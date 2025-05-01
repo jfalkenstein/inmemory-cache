@@ -2,6 +2,7 @@ package inmemorycache
 
 import (
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 
 func TestCache(t *testing.T) {
 	cache := NewCacher(1 * time.Millisecond)
+	defer cache.Close()
 	wg := sync.WaitGroup{}
 	for i := range 10000 {
 		wg.Add(1)
@@ -17,14 +19,16 @@ func TestCache(t *testing.T) {
 			now := time.Now()
 			key := fmt.Sprintf("key %d", i)
 			value := fmt.Sprintf("value %d", i)
+			randomMsecs := rand.Intn(100)
+			randomMsecs += 20
 			cache.Set(
 				key,
 				[]byte(value),
-				now.Add(10*time.Millisecond),
+				now.Add(time.Duration(randomMsecs)*time.Millisecond),
 			)
 			result, ok := cache.Get(key)
 			if !ok {
-				t.Log("key not available")
+				t.Logf("key not available: %s", key)
 				t.Fail()
 			} else if string(result) != value {
 				t.Logf("Unexpected value: %v", result)
@@ -32,7 +36,7 @@ func TestCache(t *testing.T) {
 			} else {
 				t.Logf("It worked %d", i)
 			}
-			time.Sleep(11 * time.Millisecond)
+			time.Sleep(time.Duration(randomMsecs+1) * time.Millisecond)
 			_, ok = cache.Get(key)
 			if ok {
 				t.Logf("Got a record when I shouldn't have!")
@@ -41,5 +45,4 @@ func TestCache(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	cache.Close()
 }
