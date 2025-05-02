@@ -1,6 +1,7 @@
 package inmemorycache
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -8,11 +9,14 @@ import (
 	"github.com/MauriceGit/skiplist"
 )
 
-const DefaultTimeBetweenExpirations = 1 * time.Minute
+const (
+	DefaultTimeBetweenExpirations = 1 * time.Minute
+	DefaultTTL = 24 * time.Hour
+)
 
 type Cacher interface {
 	Get(key string) ([]byte, bool)
-	Set(key string, value []byte, expiration time.Time)
+	Set(key string, value []byte, ttlOrExpiration ...any)
 	Delete(key string)
 	Close()
 }
@@ -31,22 +35,50 @@ func (c *CacheNode) String() string {
 	return c.key
 }
 
+type CacherOptions struct {
+	NowFunc                     func() time.Time
+	TimeBetweenExpirationChecks time.Duration
+	DefaultTTL time.Duration
+}
+
 type cache struct {
 	innerCache  sync.Map
 	expirations skiplist.SkipList
 	now         func() time.Time
 
-	timeBetweenExpirations time.Duration
+	defaultTTL                  time.Duration
+	timeBetweenExpirationChecks time.Duration
+	newExpirationsChannel       chan *CacheNode
+	deletionsChannel            chan *CacheNode
+	stopChannel                 chan bool
+	isStopped                   atomic.Bool
+}
 
-	newExpirationsChannel chan *CacheNode
-	updationsChannel      chan *CacheNode
-	deletionsChannel      chan *CacheNode
-	stopChannel           chan bool
-	isStopped atomic.Bool
+func NewCacher(opts ...func(*CacherOptions)) Cacher {
+	options := CacherOptions{
+		NowFunc:                     func() time.Time { return time.Now().UTC() },
+		TimeBetweenExpirationChecks: DefaultTimeBetweenExpirations,
+	}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	c := cache{
+		innerCache:                  sync.Map{},
+		expirations:                 skiplist.New(),
+		now:                         options.NowFunc,
+		timeBetweenExpirationChecks: options.TimeBetweenExpirationChecks,
+
+		newExpirationsChannel: make(chan *CacheNode, 100),
+		deletionsChannel:      make(chan *CacheNode, 100),
+		stopChannel:           make(chan bool, 1),
+	}
+	c.start()
+	return &c
 }
 
 func (c *cache) start() {
-	ticker := time.NewTicker(c.timeBetweenExpirations)
+	ticker := time.NewTicker(c.timeBetweenExpirationChecks)
 	go func() {
 		for {
 			select {
@@ -62,8 +94,7 @@ func (c *cache) start() {
 				c.expirations.Delete(node)
 			case <-ticker.C:
 				c.expire()
-			case <- c.stopChannel:
-				c.isStopped.Store(true)
+			case <-c.stopChannel:
 				return
 			}
 		}
@@ -76,21 +107,7 @@ func (c *cache) Close() {
 	}
 	c.stopChannel <- true
 	close(c.newExpirationsChannel)
-}
-
-func NewCacher(timeBetweenExpirations time.Duration) Cacher {
-	c := cache{
-		innerCache:             sync.Map{},
-		expirations:            skiplist.New(),
-		now:                    func() time.Time { return time.Now().UTC() },
-		timeBetweenExpirations: timeBetweenExpirations,
-		newExpirationsChannel:  make(chan *CacheNode, 100),
-		updationsChannel:       make(chan *CacheNode, 100),
-		deletionsChannel:       make(chan *CacheNode, 100),
-		stopChannel:            make(chan bool, 1),
-	}
-	c.start()
-	return &c
+	c.isStopped.Store(true)
 }
 
 func (c *cache) Get(key string) ([]byte, bool) {
@@ -109,11 +126,15 @@ func (c *cache) Get(key string) ([]byte, bool) {
 	return asNode.value, true
 }
 
-func (c *cache) Set(key string, value []byte, expiration time.Time) {
+func (c *cache) Set(key string, value []byte, ttlOrExpiry ...any) {
 	if c.isStopped.Load() {
 		panic("cache has already been closed")
 	}
+	expiration := c.parseTtlOrExpiry(ttlOrExpiry)
 	asNode := CacheNode{key: key, value: value, expiration: expiration.UTC().UnixMilli()}
+	// We want to use LoadOrStore here because we need to know if the key was already
+	// set. If it was, we want to replace it in the expirations list; otherwise, it'll
+	// be in the wrong order in the skip-list. 
 	if existing, ok := c.innerCache.LoadOrStore(key, &asNode); ok {
 		c.deletionsChannel <- &asNode
 		existingNode := existing.(*CacheNode)
@@ -122,6 +143,24 @@ func (c *cache) Set(key string, value []byte, expiration time.Time) {
 		c.newExpirationsChannel <- existingNode
 	} else {
 		c.newExpirationsChannel <- &asNode
+	}
+}
+
+func (c *cache) parseTtlOrExpiry(ttlOrExpiry []any) time.Time {
+	var toParse any
+	if len(ttlOrExpiry) == 0 {
+		toParse = c.defaultTTL
+	} else {
+		toParse = ttlOrExpiry[0]
+	}	
+	
+	switch val := toParse.(type) {
+	case time.Time:
+		return val
+	case time.Duration:
+		return c.now().Add(val)
+	default:
+		panic(fmt.Sprintf("unexpected type for ttlOrExpiry: %T", toParse))
 	}
 }
 
