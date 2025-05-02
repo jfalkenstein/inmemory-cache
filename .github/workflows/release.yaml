@@ -1,0 +1,39 @@
+name: Release
+
+on:
+    workflow_run:
+        workflows:
+            - "Lint, Build, and Test"
+
+concurrency:
+    group: "release"
+    cancel-in-progress: false
+
+permissions:
+    contents: write
+    actions: write
+
+jobs:
+    create-release:
+        runs-on: "ubuntu-latest"
+        if: ${{ github.event.workflow_run.conclusion == 'success' }}
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
+            -   name: Semantic Version
+                uses: PaulHatch/semantic-version@v5.4.0
+                id: version
+                with:
+                    tag_prefix: "v"
+                    major_pattern: "BUMP_MAJOR"
+                    minor_pattern: "BUMP_MINOR"
+                    bump_each_commit: true
+            -   name: Create Release
+                uses: comnoco/create-release-action@v2.0.5
+                env: 
+                    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                with:
+                    release_name: "v${{ steps.version.outputs.version }}"
+                    tag_name: "v${{ steps.version.outputs.version }}"
