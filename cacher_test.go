@@ -112,18 +112,17 @@ func (c *CacherSuite) TestSetThenGetWithMassiveConcurrency_AvoidsDeadlocks() {
 		co.TimeBetweenExpirationChecks = 1 * time.Millisecond
 	})
 	defer cacher.Close()
-
+	numMessages := 1000000
+	numWorkers := 10000
 	waitGroup := sync.WaitGroup{}
-	// We're going to perform 1,000,000 operations
-	waitGroup.Add(1000000)
-	keyChannel := make(chan int)
-	go func() {
-		for i := range 1000000 {
-			keyChannel <- i
-		}
-	}()
-	// with 10,000 concurrent goroutines processing those operations
-	for range 10000 {
+	waitGroup.Add(numMessages)
+	keyChannel := make(chan int, numMessages)
+	defer close(keyChannel)
+	// pre-load the channel so we're ready to take off the moment we start
+	for i := range numMessages {
+		keyChannel <- i
+	}
+	for range numWorkers {
 		go func() {
 			for {
 				keyInt, ok := <-keyChannel
@@ -145,7 +144,6 @@ func (c *CacherSuite) TestSetThenGetWithMassiveConcurrency_AvoidsDeadlocks() {
 		}()
 	}
 	waitGroup.Wait()
-	close(keyChannel)
 }
 
 func (c *CacherSuite) TestCloseThenGet_Panics() {
