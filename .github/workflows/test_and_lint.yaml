@@ -1,0 +1,28 @@
+name: "Lint, Build, and Test"
+
+on:
+  pull_request:
+    types:
+      - "opened"
+      - "reopened"
+      - "synchronize"
+  push:
+    branches:
+      - "main"
+
+concurrency:
+  group: ${{ github.ref_name }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint:
+    runs_on: "ubuntu-latest"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: GolangCI-Lint
+        uses: golangci/golangci-lint-action@v7
+        
