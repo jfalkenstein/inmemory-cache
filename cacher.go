@@ -108,18 +108,29 @@ func NewCacher(opts ...func(*CacherOptions)) Cacher {
 	return &c
 }
 
+// startExpirationCycle runs a goroutine in the background that takes care of the 
+// "administrative" work handling cache expirations. It adds new expirations to the
+// expirations skip-list, deletes expirations for keys that have been deleted, and periodically
+// removes expired keys from the cache.
+// 
+// Note: this method is invoked by the constructor and should only be invoked once, since the
+// skip-list is not a thread-safe container that is able to be concurrently written to. This 
+// isn't really a limitation, though, since this only does administrative work of managing the
+// skip-list. It's ok if expired items are technically still stored for a period of time after
+// they have expired; the Get() method will not return an expired item, so that guarantee is 
+// protected there.
 func (c *cache) startExpirationCycle() {
 	go func() {
 		ticker := time.NewTicker(c.timeBetweenExpirationChecks)
 		for {
 			select {
 			case node, ok := <-c.newExpirationsChannel:
-				if !ok {
+				if !ok { // This would only happen in a race condition when we're shutting down
 					continue
 				}
 				c.expirations.Insert(node)
 			case node, ok := <-c.deletionsChannel:
-				if !ok {
+				if !ok {  // This would only happen in a race condition when we're shutting down
 					continue
 				}
 				c.expirations.Delete(node)
@@ -132,6 +143,9 @@ func (c *cache) startExpirationCycle() {
 	}()
 }
 
+// Close discontinues the expiration cycle and closes the internal channels used by this
+// utility. This method should be invoked at the end of use. After it is invoked, the cache
+// will no longer be usable.
 func (c *cache) Close() {
 	if c.isStopped.Load() {
 		return
@@ -142,6 +156,9 @@ func (c *cache) Close() {
 	c.isStopped.Store(true)
 }
 
+// Get retrieves a value from the cache using the indicated key, returning the value and true
+// if the cache was hit or false if the value didn't exist. This method will not return expired
+// keys.
 func (c *cache) Get(key string) ([]byte, bool) {
 	if c.isStopped.Load() {
 		panic("cache has already been closed")
@@ -158,6 +175,13 @@ func (c *cache) Get(key string) ([]byte, bool) {
 	return asNode.value, true
 }
 
+// Set sets a value onto the cache using the indicated key. It can be invoked with a 
+// ttlOrExpirty argument. If a time.Duration is passed, this is the TTL for the cached value.
+// If a time.Time is passed, this is the exact datetime that the cached value will expire.
+// If no ttlOrExpiry is passed, this will use the DefaultTTL setting to determine the TTL for the
+// cached value.
+//
+// This method can be invoked again for the same key to update the value and/or the ttlOrExpiry. 
 func (c *cache) Set(key string, value []byte, ttlOrExpiry ...any) {
 	if c.isStopped.Load() {
 		panic("cache has already been closed")
@@ -178,6 +202,8 @@ func (c *cache) Set(key string, value []byte, ttlOrExpiry ...any) {
 	}
 }
 
+// parseTtlOrExpiry converts the ...any ttlOrExpiry argument to a specific expiration
+// datetime.
 func (c *cache) parseTtlOrExpiry(ttlOrExpiry []any) time.Time {
 	var toParse any
 	if len(ttlOrExpiry) == 0 {
@@ -196,10 +222,13 @@ func (c *cache) parseTtlOrExpiry(ttlOrExpiry []any) time.Time {
 	}
 }
 
+// Delete removes the indicated key from the channel.
 func (c *cache) Delete(key string) {
 	if c.isStopped.Load() {
 		panic("cache has already been closed")
 	}
+	// We use LoadAndDelete here because we need to know if the key actually exists in the cache.
+	// If it doesn't, we don't need to delete it from the expirations list.
 	if value, ok := c.innerCache.LoadAndDelete(key); ok {
 		c.deletionsChannel <- value.(*CacheNode)
 	}
@@ -210,6 +239,13 @@ func (c *cache) delete(node *CacheNode) {
 	c.expirations.Delete(node)
 }
 
+// expire does the "heavy lifting" of handling cache expirations. It is intended to be
+// invoked ONLY by the expiration cycle goroutine. This leverages the benefits of using a
+// skip-list to store the expirations for the cached values. It is VERY efficient to 
+// start with the smallest value and traverse forwards to later expirations. Since values
+// are stored in the correct order when they're inserted, walking the expirations is as 
+// simple as traversing an ordered LinkedList and stopping when the expiration values get
+// higher than is targeted.
 func (c *cache) expire() {
 	now := c.now()
 	nowTimestamp := now.UnixMilli()
@@ -225,9 +261,14 @@ func (c *cache) expire() {
 			toRemove = append(toRemove, node)
 			element = c.expirations.Next(element)
 		} else {
+			// Since the values are ordered by definition, if we hit a timestamp that isn't
+			// already expired, we know we're done.
 			break
 		}
 	}
+	// We only delete the nodes after we gather up the ones to delete so that we didn't delete
+	// any nodes mid-cycle. Also, deleting nodes in asscending order is the fastest way to 
+	// remove them in a skip-list.
 	for _, node := range toRemove {
 		c.delete(node)
 	}
