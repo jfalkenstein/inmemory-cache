@@ -94,6 +94,9 @@ func NewCacher(timeBetweenExpirations time.Duration) Cacher {
 }
 
 func (c *cache) Get(key string) ([]byte, bool) {
+	if c.isStopped.Load() {
+		panic("cache has already been closed")
+	}
 	node, ok := c.innerCache.Load(key)
 	if !ok {
 		return nil, false
@@ -107,6 +110,9 @@ func (c *cache) Get(key string) ([]byte, bool) {
 }
 
 func (c *cache) Set(key string, value []byte, expiration time.Time) {
+	if c.isStopped.Load() {
+		panic("cache has already been closed")
+	}
 	asNode := CacheNode{key: key, value: value, expiration: expiration.UTC().UnixMilli()}
 	if existing, ok := c.innerCache.LoadOrStore(key, &asNode); ok {
 		c.deletionsChannel <- &asNode
@@ -120,6 +126,9 @@ func (c *cache) Set(key string, value []byte, expiration time.Time) {
 }
 
 func (c *cache) Delete(key string) {
+	if c.isStopped.Load() {
+		panic("cache has already been closed")
+	}
 	if value, ok := c.innerCache.LoadAndDelete(key); ok {
 		c.deletionsChannel <- value.(*CacheNode)
 	}

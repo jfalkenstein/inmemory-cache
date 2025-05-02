@@ -12,7 +12,8 @@ func TestCache(t *testing.T) {
 	cache := NewCacher(1 * time.Millisecond)
 	defer cache.Close()
 	wg := sync.WaitGroup{}
-	for i := range 10000 {
+
+	for i := range 10001 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
