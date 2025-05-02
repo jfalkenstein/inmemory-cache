@@ -25,4 +25,37 @@ jobs:
         uses: actions/checkout@v4
       - name: GolangCI-Lint
         uses: golangci/golangci-lint-action@v7
+  test:
+    runs-on: "ubuntu-latest"
+    steps: 
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - name: Run tests
+        run: "go test"
+  tidy:
+    runs-on: "ubuntu-latest"
+    steps: 
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - name: Tidy check
+        uses: katexochen/go-tidy-check@v2
+  build:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - name: Run tests
+        run: "go build"
         
