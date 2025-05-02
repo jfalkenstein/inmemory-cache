@@ -35,9 +35,7 @@ retrieved, ok := cache.Get("my key") // ok will be False if the value was not se
 ```
 
 ## How does it work?
-
-This cache is pretty efficient. It's also very concurrency safe. This is powered by a few 
-main pieces:
+This cache is pretty efficient. It's also very concurrency safe. This is powered by a few main pieces:
 
 ### A sync.Map for key/value storage
 This provides guarantees around concurrent access, atomic operations, and performance.
