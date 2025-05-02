@@ -5,7 +5,7 @@ This is a sample component intended to demonstrate how I would design an efficie
 in-memory cache.
 
 ## How do I install it?
-`go get github.com/jfalkenstein/inmemory-cache@v1.0.0`
+`go get github.com/jfalkenstein/inmemory-cache`
 
 ## How do I use it?
 
