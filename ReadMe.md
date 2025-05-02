@@ -4,6 +4,9 @@
 This is a sample component intended to demonstrate how I would design an efficient, thread-safe
 in-memory cache.
 
+## How do I install it?
+`go get github.com/jfalkenstein/inmemory-cache@v1.0.0`
+
 ## How do I use it?
 
 Use is pretty simple. Instantiate the component like this:
